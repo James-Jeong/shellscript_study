@@ -1,0 +1,100 @@
+#! /bin/bash
+
+function get_peer_data_path (){
+	echo $ACCEPT_SCRIPT_PATH/data
+}
+
+function get_sipp_path(){
+	echo $ACCEPT_TEST_PATH
+}
+
+function get_sipp_data_path (){
+	echo $(get_sipp_path)"/user_data"
+}
+
+function get_info_path (){
+	echo $(get_sipp_data_path)"/common_info.csv"
+}
+
+function change_peer_conf (){
+	#$1 = peer_name
+	#$2 = ip
+	#$3 = port
+
+	if [ $# -ne 3 ] ; then
+		echo "need argument
+		ex> $0 <peer_name> <ip> <port>
+		"
+		exit
+	fi
+
+	# 1) Check whether 'envsubst' is exist
+	result=$(type envsubst)
+	if [[ "$result" =~ "not found" ]];then
+		echo "! Not found command : envsubst"
+		exit
+	fi
+
+	# 2) Check whether the peer data path is exist
+	peer_data_path=$(get_peer_data_path)
+	peer_data=$peer_data_path/"peer_"$1".dat"
+	if [ ! -f $peer_data ];then
+		echo "! Not found data : "$peer_data
+		exit
+	fi
+
+	# 3) Parse the peer data in regular order & Check whether the data is normal
+	list=($(jq .[] $peer_data))
+	peer_len=${#list[@]}
+	if [ $peer_len -eq 0 ];then
+		echo "! json data error : "$peer_data
+		exit
+	fi
+
+	# 4) Compare the number of key
+	tmpl_len=$(cat $peer_data_path/peer_template.tmpl | wc -l)
+	tmpl_len=$(($tmpl_len-2)) # except '{', '}'
+	if [ $peer_len != $tmpl_len ];then
+		echo "Unmatch key | peer : "$peer_len" / tmpl : "$tmpl_len
+		exit
+	fi
+
+	# 5) Check whether IP or PORT is changed
+	is_change=0
+	ip='"'$2'"'
+	if [[ "$ip" != "${list[3]}" ]];then
+		export IP=$ip
+		echo "+ peer_"$1".dat | IP : "${list[3]}" -> "$ip
+		is_change+=1
+	fi
+	if [[ "$3" != "${list[4]}" ]];then
+		export PORT=$3
+		echo "+ peer_"$1".dat | PORT : "${list[4]}" -> "$3
+		is_change+=2
+	fi
+
+	# 6) If changed, alter the peer data
+	if [ $is_change -ge 1 ];then
+		# Keep the other data, which are not IP & PORT
+		export ID=${list[0]} \
+		RULE_NAME=${list[1]} \
+		DOMAIN=${list[2]} \
+		HEARTBEAT_TIMER=${list[5]} \
+		NODE_TYPE=${list[6]} \
+		POSITION=${list[7]} \
+		OPTIONS=${list[8]} \
+		SCREEN=${list[9]}
+
+		# IP is changed, PORT not. So, keep the PORT
+		if [ $is_change -eq 1 ];then
+			export PORT=${list[4]}
+		# PORT is changed, IP not, So, keep the IP
+		elif [ $is_change -eq 2 ];then
+			export IP=${list[3]}
+		fi
+
+		# Use 'envsubst' with peer_template.tmpl
+		envsubst < $peer_data_path"/peer_template.tmpl" > $peer_data
+	fi
+}
+
